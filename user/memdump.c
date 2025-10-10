@@ -1,6 +1,7 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+// #include <stdio.h>
 
 void memdump(char *fmt, char *data);
 
@@ -39,7 +40,8 @@ main(int argc, char *argv[])
     printf("Example 5:\n");
     memdump("sccccc", (char*) &example);
   } else if(argc == 2){
-    // format in argv[1], up to 512 bytes of data from standard input.
+    // format in argv[1], up to 512 bytes of data from standard 
+    // input.
     char data[512];
     int n = 0;
     memset(data, '\0', sizeof(data));
@@ -57,9 +59,40 @@ main(int argc, char *argv[])
   exit(0);
 }
 
+char* print(char ch, char *data) {
+  switch (ch) {
+    case 'i': {
+      printf("%d\n", *((uint*)(data)));
+      return data + 4;
+    }
+    case 'p': {
+      printf("%lx\n", *((uint64*)(data)));
+      return data + 8;
+    }
+    case 'h': {
+      printf("%d\n", *((uint16*)(data)));
+      return data + 2;
+    }
+    case 'c': {
+      printf("%c\n", *data);
+      return data + 1;
+    }
+    case 's': {
+      printf("%s\n", *((char**)data));
+      return data + 8;
+    }
+    case 'S': {
+      printf("%s\n", data);
+      return data + strlen(data);
+    }
+  }
+  return data;
+}
+
 void
 memdump(char *fmt, char *data)
 {
-  // Your code here.
-
+  for (int i=0; fmt[i]!=0; i++) {
+    data = print(fmt[i], data);
+  } 
 }
