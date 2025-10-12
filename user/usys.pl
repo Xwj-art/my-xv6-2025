@@ -21,6 +21,7 @@ sub entry {
     print " ret\n";
 }
 	
+entry("interpose");
 entry("fork");
 entry("exit");
 entry("wait");

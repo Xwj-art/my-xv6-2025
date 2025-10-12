@@ -1,0 +1,42 @@
+file kernel/kernel
+gdb-remote localhost:25501
+target modules add user/_secret
+breakpoint set --name main --shlib user/_secret
+breakpoint set --name sys_sbrk
+breakpoint set --name sys_exec
+breakpoint command add 1
+    print "=== SECRET 程序开始执行 ==="
+    print "进程信息:"
+    p *myproc()
+    print "参数检查:"
+    p (char*)p->trapframe->a1
+    continue
+end
+
+breakpoint command add 2
+    print "=== 内存分配操作 ==="
+    p "分配大小:" 
+    p n
+    p "分配类型:"
+    p t
+    p "返回地址:"
+    p addr
+    continue
+end
+
+breakpoint command add 3
+    print "=== 程序执行 ==="
+    p "执行文件名:"
+    p (char*)p->trapframe->a1
+    continue
+end
+
+command alias dp disassemble -p -c 5
+command alias pm memory read --size 1 --format c --count 32
+command alias regs register read a0 a1 a2 a3 a7
+
+print "调试环境已就绪!"
+print "请在 QEMU 终端中执行: secret '您的测试字符串'"
+print "LLDB 将自动监视 secret 程序的执行过程"
+
+continue

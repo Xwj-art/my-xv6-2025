@@ -7,6 +7,16 @@
 #include "syscall.h"
 #include "defs.h"
 
+void pi(int i) {
+  printf("===========================\n");
+  printf("==============%d===========\n", i);
+  printf("===========================\n");
+}
+void ps(char *s) {
+  printf("===========================\n");
+  printf("==============%s===========\n", s);
+  printf("===========================\n");
+}
 // Fetch the uint64 at addr from the current process.
 int
 fetchaddr(uint64 addr, uint64 *ip)
@@ -101,6 +111,7 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+extern uint64 sys_interpose(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -126,15 +137,33 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_interpose]   sys_interpose,
 };
 
 void
 syscall(void)
 {
   int num;
+  char path[MAXPATH];
   struct proc *p = myproc();
+  // open系统调用，第一个参数是文件名，不要专注于
+  // 命令行的输入，那只是用户输入，关注open的参数列表
+  // 在interpose设置完以后，当前进程的mask和path就设置好了
+  // 命令行任务就结束了，要关心的是open的调用，open调用的
+  // 文件放在第一个参数，a0
+  argstr(0, path, sizeof(path));
 
   num = p->trapframe->a7;
+  // num 系统调用值，判断是否需要拒绝
+  if ((1 << num) & p->mask) {
+    // 除了允许的名字，都拒绝
+    ps(path);
+    ps(p->path);
+    if (strncmp(p->path, path, sizeof(path))) {
+      p->trapframe->a0 = -1;
+      return ;
+    }
+  }
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0

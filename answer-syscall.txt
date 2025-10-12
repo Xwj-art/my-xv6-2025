@@ -1,0 +1,5 @@
+usertrap
+15 SYS_open
+user mode
+lw a5, 0(a5) a5
+init 1

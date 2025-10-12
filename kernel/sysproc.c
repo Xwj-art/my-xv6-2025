@@ -105,3 +105,15 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_interpose(void) 
+{
+  int mask;
+  char path[MAXPATH];
+  argint(0, &mask);
+  argstr(1, path, sizeof(path));
+  myproc()->mask = mask;
+  strncpy(myproc()->path, path, sizeof(path));
+  return 1;
+}
