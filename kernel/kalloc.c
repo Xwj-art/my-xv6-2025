@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define SUPERNUM 20
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,6 +23,7 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  struct run *superreserve;
 } kmem;
 
 void
@@ -34,6 +37,9 @@ void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
+  p = (char*)SUPERPGROUNDUP((uint64)pa_start);
+  for(int i=0; i<SUPERNUM; i++, p += SUPERPGSIZE)
+    superfree(p);
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
@@ -43,6 +49,24 @@ freerange(void *pa_start, void *pa_end)
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
+void superfree(void *pa) 
+{
+  struct run *r;
+
+  if((char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("superfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, SUPERPGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&kmem.lock);
+  r->next = kmem.superreserve;
+  kmem.superreserve = r;
+  release(&kmem.lock);
+}
+
 void
 kfree(void *pa)
 {
@@ -65,6 +89,22 @@ kfree(void *pa)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+void * 
+superalloc(void) 
+{
+  struct run *r;
+
+  acquire(&kmem.lock);
+  r = kmem.superreserve;
+  if (r)
+    kmem.superreserve = r->next;
+  release(&kmem.lock);
+
+  if(r)
+    memset((char*)r, 5, SUPERPGSIZE); // fill with junk
+  return (void*)r;
+}
+
 void *
 kalloc(void)
 {

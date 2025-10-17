@@ -1,0 +1,4 @@
+file kernel/kernel
+gdb-remote localhost:25501
+b uvmalloc
+c
