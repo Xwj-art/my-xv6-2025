@@ -1,8 +1,12 @@
+#ifndef DEFS_H
+#define DEFS_H
+
 #ifdef LAB_MMAP
-gtypedef unsigned long size_t;
+typedef unsigned long size_t;
 typedef long int off_t;
 #endif
 
+// 前置声明结构体
 struct buf;
 struct context;
 struct file;
@@ -92,9 +96,9 @@ int cpuid(void);
 void kexit(int);
 int kfork(void);
 int growproc(int);
-void proc_mapstacks(pagetable_t);
-pagetable_t proc_pagetable(struct proc*);
-void proc_freepagetable(pagetable_t, uint64);
+void proc_mapstacks(pagetable_t pagetable);
+pagetable_t proc_pagetable(struct proc* p);
+void proc_freepagetable(pagetable_t pagetable, uint64 sz);
 int kkill(int);
 int killed(struct proc*);
 void setkilled(struct proc*);
@@ -170,32 +174,30 @@ void uartputc_sync(int);
 int uartgetc(void);
 
 // vm.c
-void paddr(uint64);
-void pt(char*);
 void kvminit(void);
 void kvminithart(void);
-void kvmmap(pagetable_t, uint64, uint64, uint64, int);
-int mappages(pagetable_t, uint64, uint64, uint64, int);
+void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm);
+int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm);
 pagetable_t uvmcreate(void);
-uint64 uvmalloc(pagetable_t, uint64, uint64, int);
-uint64 uvmdealloc(pagetable_t, uint64, uint64);
-int uvmcopy(pagetable_t, pagetable_t, uint64);
-void uvmfree(pagetable_t, uint64);
-void uvmunmap(pagetable_t, uint64, uint64, int);
-void uvmunmap_high(pagetable_t, uint64);
-void uvmclear(pagetable_t, uint64);
-pte_t* walk(pagetable_t, uint64, int);
-uint64 walkaddr(pagetable_t, uint64);
-int copyout(pagetable_t, uint64, char*, uint64);
-int copyin(pagetable_t, char*, uint64, uint64);
-int copyinstr(pagetable_t, char*, uint64, uint64);
-int ismapped(pagetable_t, uint64);
-uint64 vmfault(pagetable_t, uint64, int);
+uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm);
+uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz);
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz);
+void uvmfree(pagetable_t pagetable, uint64 sz);
+void uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free);
+void uvmunmap_high(pagetable_t pagetable, uint64 va);
+void uvmclear(pagetable_t pagetable, uint64 va);
+pte_t* walk(pagetable_t pagetable, uint64 va, int alloc);
+uint64 walkaddr(pagetable_t pagetable, uint64 va);
+int copyout(pagetable_t pagetable, uint64 dstva, char* src, uint64 len);
+int copyin(pagetable_t pagetable, char* dst, uint64 srcva, uint64 len);
+int copyinstr(pagetable_t pagetable, char* dst, uint64 srcva, uint64 max);
+int ismapped(pagetable_t pagetable, uint64 va);
+uint64 vmfault(pagetable_t pagetable, uint64 va, int read);
 #if defined(LAB_PGTBL) || defined(SOL_MMAP)
-void vmprint(pagetable_t);
+void vmprint(pagetable_t pagetable);
 #endif
 #ifdef LAB_PGTBL
-pte_t* pgpte(pagetable_t, uint64);
+pte_t* pgpte(pagetable_t pagetable, uint64 va);
 #endif
 
 // plic.c
@@ -214,8 +216,8 @@ void virtio_disk_intr(void);
 
 #ifdef LAB_PGTBL
 // vmcopyin.c
-int copyin_new(pagetable_t, char*, uint64, uint64);
-int copyinstr_new(pagetable_t, char*, uint64, uint64);
+int copyin_new(pagetable_t pagetable, char* dst, uint64 srcva, uint64 len);
+int copyinstr_new(pagetable_t pagetable, char* dst, uint64 srcva, uint64 max);
 #endif
 
 #ifdef LAB_LOCK
@@ -245,3 +247,6 @@ void netinit(void);
 void net_rx(char* buf, int len);
 
 #endif
+
+#endif // DEFS_H
+

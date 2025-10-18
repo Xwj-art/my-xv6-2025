@@ -72,7 +72,7 @@ usertrap(void)
             vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
     // page fault on lazily-allocated page
   } else {
-    paddr(vmfault(p->pagetable, r_stval(), 0));
+    // paddr(vmfault(p->pagetable, r_stval(), 0));
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     setkilled(p);
