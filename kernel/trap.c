@@ -19,7 +19,6 @@ extern int devintr();
 void trapinit(void) {
   initlock(&tickslock, "time");
 }
-void test() {}
 
 // set up to take exceptions and traps while in the kernel.
 void trapinithart(void) {
@@ -45,10 +44,6 @@ uint64 usertrap(void) {
   // save user program counter.
   p->trapframe->epc = r_sepc();
 
-  if (r_scause() == 12) {
-    test();
-  }
-
   if (r_scause() == 8) {
     // system call
 
@@ -68,31 +63,12 @@ uint64 usertrap(void) {
   } else if ((r_scause() == 15 || r_scause() == 13) &&
              vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0) != 0) {
     // page fault on lazily-allocated page
-  }
-  /*
-  else if (r_scause() == 13 || r_scause() == 15) {
-    uint64 va = r_stval();
-    uint read = r_scause() == 13;
-    // 1. 地址有效性检查
-    if (va >= p->sz) {
-      setkilled(p);
-      goto killed;
-    }
-    // 2. COW 页面处理
-    if (iscow(p->pagetable, va)) {
-      if (cowalloc(p->pagetable, va) == 0) {
-        setkilled(p);  // 分配失败
-        goto killed;
-      }
-    }
-  }*/
-  else {
+  } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-    p->killed = 1;
+    setkilled(p);
   }
 
-  // killed:
   if (killed(p)) kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
