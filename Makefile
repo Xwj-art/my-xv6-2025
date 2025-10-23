@@ -61,7 +61,7 @@ endif
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+#TOOLPREFIX =
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -293,7 +293,7 @@ endif
 fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
 
-newfs.img: 
+newfs.img:
 	-mv -f fs.img fs.img.bk
 
 -include kernel/*.d user/*.d
@@ -360,6 +360,17 @@ endif
 ifneq ($(V),@)
 GRADEFLAGS += -v
 endif
+
+# 在 Makefile 的末尾添加以下内容
+
+# 自动运行 nettest ping0 的目标
+run-nettest: $K/kernel fs.img
+	@echo "Starting QEMU and running nettest ping0..."
+	@( \
+		sleep 5; \
+		echo "nettest ping0"; \
+		sleep 1; \
+	) | $(QEMU) $(QEMUOPTS) -serial stdio
 
 print-gdbport:
 	@echo $(GDBPORT)

@@ -1,0 +1,5 @@
+file kernel/kernel
+gdb-remote localhost:25501
+b sys_recv
+b --file net.c --line 300
+c

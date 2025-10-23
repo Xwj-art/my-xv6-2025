@@ -232,6 +232,8 @@ void            kcsaninit();
 void            pci_init();
 
 // e1000.c
+void            pt(char*);
+void            pd(int);
 void            e1000_init(uint32 *);
 void            e1000_intr(void);
 int             e1000_transmit(char *, int);
