@@ -108,6 +108,7 @@ int e1000_transmit(char *buf, int len) {
     return -1;
   }
   if (tx_ring[index].addr) {
+    pt("e1000_transmit: tx buf free");
     kfree((void *)tx_ring[index].addr);
   }
   // 然后将tx_ring[index].addr指向要填充的数据，设置cmd
@@ -130,6 +131,7 @@ static void e1000_recv(void) {
       return;
     }
     net_rx((char *)rx_ring[index].addr, rx_ring[index].length);
+    pt("e1000_recv: rx buf free");
     rx_ring[index].addr = (uint64)kalloc();
     rx_ring[index].status = 0;
     regs[E1000_RDT] = (regs[E1000_RDT] + 1) % TX_RING_SIZE;

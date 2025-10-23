@@ -73,6 +73,7 @@ void netinit(void) {
 //
 uint64 sys_bind(void) {
   int port;
+  struct proc *p = myproc();
   argint(0, &port);
   acquire(&portmanager.portlock);
   if (portmanager.ports[port]) {
@@ -80,10 +81,12 @@ uint64 sys_bind(void) {
     release(&portmanager.portlock);
     return -1;
   }
+  portmanager.pid[port] = p->pid;
   portmanager.ports[port] = 1;
   release(&portmanager.portlock);
 
   // 初始化对应的队列
+  pt("sys_bind: queue kalloc");
   struct port_queue *queue = (struct port_queue *)kalloc();
 
   if (queue == 0) {
@@ -171,6 +174,7 @@ uint64 sys_recv(void) {
 
   // 设置queue
   // 释放内存
+  pt("sys_recv: data free");
   kfree((void *)queue->retinfos[head].data);
   queue->head = (head + 1) % MAX_QUEUE_SIZE;
   queue->count--;
@@ -233,6 +237,7 @@ uint64 sys_send(void) {
   int total = len + sizeof(struct eth) + sizeof(struct ip) + sizeof(struct udp);
   if (total > PGSIZE) return -1;
 
+  pt("sys_send: send buf kalloc");
   char *buf = kalloc();
   if (buf == 0) {
     printf("sys_send: kalloc failed\n");
@@ -264,6 +269,7 @@ uint64 sys_send(void) {
 
   char *payload = (char *)(udp + 1);
   if (copyin(p->pagetable, payload, bufaddr, len) < 0) {
+    pt("sys_send: send buf free");
     kfree(buf);
     printf("send: copyin failed\n");
     return -1;
@@ -282,6 +288,7 @@ int save_queue(struct retinfo info, uint16 port) {
     // 如果能放
     queue->retinfos[queue->tail].src = info.src;
     queue->retinfos[queue->tail].sport = info.sport;
+    pt("save_queue: queue data kalloc");
     queue->retinfos[queue->tail].data = kalloc();
     memset(queue->retinfos[queue->tail].data, 0, PGSIZE);
     memmove((void *)queue->retinfos[queue->tail].data, (void *)info.data, info.len);
@@ -323,9 +330,11 @@ void ip_rx(char *buf, int len) {
       if (save_queue(info, dport) < 0) {
         pt("fail");
       }
+      pt("ip_rx: recv buf free");
       kfree(buf);
     } else {
       // 未绑定端口号
+      pt("ip_rx: recv buf free");
       kfree(buf);
     }
   }
@@ -342,6 +351,7 @@ void arp_rx(char *inbuf) {
   static int seen_arp = 0;
 
   if (seen_arp) {
+    pt("arp_rx: free inbuf");
     kfree(inbuf);
     return;
   }
@@ -351,6 +361,7 @@ void arp_rx(char *inbuf) {
   struct eth *ineth = (struct eth *)inbuf;
   struct arp *inarp = (struct arp *)(ineth + 1);
 
+  pt("arp_rx: alloc");
   char *buf = kalloc();
   if (buf == 0) panic("send_arp_reply");
 
@@ -373,6 +384,7 @@ void arp_rx(char *inbuf) {
 
   e1000_transmit(buf, sizeof(*eth) + sizeof(*arp));
 
+  pt("arp_rx: free inbuf");
   kfree(inbuf);
 }
 
@@ -384,6 +396,27 @@ void net_rx(char *buf, int len) {
   } else if (len >= sizeof(struct eth) + sizeof(struct ip) && ntohs(eth->type) == ETHTYPE_IP) {
     ip_rx(buf, len);
   } else {
+    pt("net_rx: free buf");
     kfree(buf);
   }
+}
+
+void netclean(int pid) {
+  uint port = 0;
+  for (; port < MAX_BOUND_PORTS; port++) {
+    if (portmanager.pid[port] == pid) break;
+  }
+  if (port == MAX_BOUND_PORTS) return;
+
+  acquire(&portmanager.portlock);
+  struct port_queue *queue = queuemanager.port_manager[port];
+  for (uint i = queue->head; i != queue->tail; i = (i + 1 + MAX_QUEUE_SIZE) % MAX_QUEUE_SIZE) {
+    pt("queue data free");
+    kfree(queue->retinfos[i].data);
+  }
+  pt("free queue");
+  kfree(queue);
+  release(&portmanager.portlock);
+
+  return;
 }
