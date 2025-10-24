@@ -76,7 +76,6 @@ void kfree(void* pa) {
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
-  printf("kfree: pa=%p, ref=%d\n", pa, refs.ref[index]);
 }
 
 // 调整引用计数+1
@@ -106,7 +105,6 @@ void* kalloc(void) {
     release(&refs.reflock);
   }
   memset((char*)r, 5, PGSIZE);  // fill with junk
-  printf("kalloc: pa=%p, ref=%d\n", r, refs.ref[index]);
 
   return (void*)r;
 }
