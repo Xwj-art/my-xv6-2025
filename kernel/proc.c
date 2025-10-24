@@ -305,10 +305,6 @@ void kexit(int status) {
   p->cwd = 0;
 
   if (p->pagetable) {
-    uvmunmap(p->pagetable, 0, PGROUNDUP(p->sz) / PGSIZE, 1);
-    freewalk(p->pagetable);
-    p->pagetable = 0;
-    p->sz = 0;
   }
 
   acquire(&wait_lock);

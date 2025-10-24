@@ -57,8 +57,6 @@ void kfree(void* pa) {
   if (((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP) panic("kfree");
 
   // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
-
   uint64 index = (uint64)pa / PGSIZE;
 
   // 引用计数-1，若减为0，释放
@@ -71,6 +69,8 @@ void kfree(void* pa) {
   release(&refs.reflock);
 
   r = (struct run*)pa;
+
+  memset(pa, 1, PGSIZE);
 
   acquire(&kmem.lock);
   r->next = kmem.freelist;
@@ -103,7 +103,8 @@ void* kalloc(void) {
     acquire(&refs.reflock);
     refs.ref[index] = 1;
     release(&refs.reflock);
-  }
+  } else
+    return 0;
   memset((char*)r, 5, PGSIZE);  // fill with junk
 
   return (void*)r;
@@ -116,6 +117,7 @@ uint64 subref(uint64 pa) {
   release(&refs.reflock);
   return ref;
 }
+
 uint64 getref(uint64 pa) {
   acquire(&refs.reflock);
   uint64 ref = refs.ref[pa / PGSIZE];

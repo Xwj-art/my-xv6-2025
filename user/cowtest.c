@@ -25,9 +25,7 @@ void simpletest() {
     *(int *)q = getpid();
   }
 
-  pt("fork");
   int pid = fork();
-  pt("fork");
   if (pid < 0) {
     printf("fork() failed\n");
     exit(-1);

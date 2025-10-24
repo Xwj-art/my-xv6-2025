@@ -1,5 +1,5 @@
 file kernel/kernel
 gdb-remote localhost:25501
-br s --name copyin
+br s --name panic
 
 c
