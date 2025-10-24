@@ -56,6 +56,9 @@ void itrunc(struct inode *);
 void ireclaim(int);
 
 // kalloc.c
+uint64 subref(uint64);
+void addref(uint64);
+uint64 getref(uint64);
 void *kalloc(void);
 void kfree(void *);
 void kinit(void);
@@ -151,6 +154,9 @@ void uartputc_sync(int);
 int uartgetc(void);
 
 // vm.c
+uint64 cowalloc(pagetable_t, uint64);
+void pt(char *);
+void paddr(uint64);
 void kvminit(void);
 void kvminithart(void);
 void kvmmap(pagetable_t, uint64, uint64, uint64, int);

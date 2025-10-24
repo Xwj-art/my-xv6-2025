@@ -1,5 +1,5 @@
 file kernel/kernel
 gdb-remote localhost:25501
-breakpoint set --file trap.c --name test
+br s --name copyin
 
 c

@@ -41,6 +41,7 @@ uint64 usertrap(void) {
 
   struct proc *p = myproc();
 
+  // pt("usertrap : r_scause()");
   // save user program counter.
   p->trapframe->epc = r_sepc();
 
@@ -60,15 +61,37 @@ uint64 usertrap(void) {
     syscall();
   } else if ((which_dev = devintr()) != 0) {
     // ok
-  } else if ((r_scause() == 15 || r_scause() == 13) &&
-             vmfault(p->pagetable, r_stval(), (r_scause() == 13) ? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
+  } else if (r_scause() == 15) {
+    uint64 va = r_stval();
+    pt("usertrap : va");
+    paddr(va);
+
+    if (va > MAXVA) {
+      // pt("va > MAXVA");
+      setkilled(p);
+    } else {
+      pte_t *pte = walk(p->pagetable, va, 0);
+      // 写时遇到错误，判断是否是cow页
+      if (ISCOW(*pte)) {
+        // pt("cowalloc");
+        if (cowalloc(p->pagetable, va) == 0) {
+          paddr(va);
+          // pt("usertrap : cowalloc");
+          setkilled(p);
+          goto err;
+        }
+      } else {
+        // pt("write fail");
+        setkilled(p);
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
     setkilled(p);
   }
 
+err:
   if (killed(p)) kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
