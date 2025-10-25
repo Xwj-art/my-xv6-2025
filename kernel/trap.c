@@ -62,47 +62,41 @@ uint64 usertrap(void) {
   } else if ((which_dev = devintr()) != 0) {
     // ok
     //
-  } else if (r_scause() == 15 || r_scause() == 13) {
+  } else if (r_scause() == 15) {
     uint64 va = r_stval();
     if (va >= p->sz) {
       setkilled(p);
       goto err;
     }
 
-    pte_t* pte = walk(p->pagetable, va, 0);
-    if (!pte) {
-      setkilled(p);
-      goto err;
-    }
+    pte_t* pte = walk(p->pagetable, va, 1);
+    // 如果是取消映射了以后呢？就不能访问了，这个时候*pte应该是0？
 
-    if (!(PTE_FLAGS(*pte) & PTE_V)) {
-      // 在范围内但是缺页了，分配内存
-      if (vmfault(p->pagetable, va, (r_scause() == 13) ? 1 : 0) == 0) {
+    // 判断是否是缺页错误，即未分配页，未设置pte
+    if (!(*pte)) {
+      // 分配页
+      char* mem = kalloc();
+      if (mem == 0) {
+        setkilled(p);
+      }
+      if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_U | PTE_R | PTE_W) != 0) {
+        kfree((void*)mem);
+        setkilled(p);
+      }
+    }
+    // 写时遇到错误，判断是否是cow页
+    else if (*pte & PTE_C) {
+      // 只可能是写错误，并且是pte_c
+      // 打印一下*pte
+      if (cowalloc(p->pagetable, va) == 0) {
         setkilled(p);
         goto err;
       }
     } else {
-      // 并不缺页，在范围内，考虑是否是cow页
-      if (r_scause() == 13) {
-        // 有页但是读错误，杀死进程
-        setkilled(p);
-        goto err;
-      }
-      // 写时遇到错误，判断是否是cow页
-      if (ISCOW(*pte)) {
-        // pt("cowalloc");
-        if (cowalloc(p->pagetable, va) == 0) {
-          // paddr(va);
-          // pt("usertrap : cowalloc");
-          setkilled(p);
-          goto err;
-        }
-      } else {
-        // 如果不是cow页的话，也是杀死进程
-        // pt("write fail");
-        setkilled(p);
-        goto err;
-      }
+      // 如果不是cow页的话，也是杀死进程
+      // pt("write fail");
+      setkilled(p);
+      goto err;
     }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);

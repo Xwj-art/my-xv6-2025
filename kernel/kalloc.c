@@ -106,7 +106,6 @@ void* kalloc(void) {
   } else
     return 0;
   memset((char*)r, 5, PGSIZE);  // fill with junk
-
   return (void*)r;
 }
 

@@ -2441,9 +2441,10 @@ void lazy_alloc(char* s) {
   }
   new_end = prev_end + REGION_SZ;
 
-  for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE)
+  // pt("lazy alloc begin");
+  for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE) {
     *(char**)i = i;
-  pt("lazyalloc : for end");
+  }
 
   for (i = prev_end + PGSIZE; i < new_end; i += 64 * PGSIZE) {
     if (*(char**)i != i) {

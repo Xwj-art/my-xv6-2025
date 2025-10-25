@@ -267,9 +267,8 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
   char* mem;
 
   for (i = 0; i < sz; i += PGSIZE) {
-    if ((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy : pte = 0");                          // page table entry hasn't been allocated
-    if ((*pte & PTE_V) == 0) panic("uvmcopy : pte_v = ");  // physical page hasn't been allocated
+    if ((pte = walk(old, i, 0)) == 0) continue;  // page table entry hasn't been allocated
+    if ((*pte & PTE_V) == 0) continue;           // physical page hasn't been allocated
 
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
@@ -277,8 +276,9 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
     if (flags & PTE_W) flags = (flags | PTE_C) & ~PTE_W;
 
     *pte = PA2PTE(pa) | flags;
-    pte_t* np = walk(new, i, 1);
-    *np = PA2PTE(pa) | flags;
+    if (mappages(new, i, PGSIZE, pa, flags) != 0) {
+      goto err;
+    }
     addref(pa);
   }
   return 0;
