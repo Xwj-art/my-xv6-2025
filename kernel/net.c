@@ -24,19 +24,18 @@ static struct spinlock netlock;
 
 static struct {
   uint8 ports[MAX_BOUND_PORTS];
-  int pid[MAX_BOUND_PORTS];
   struct spinlock portlock;
 } portmanager;
 
 struct retinfo {
   int src;
   short sport;
-  char *data;
+  char* data;
   uint len;
 };
 
 struct port_queue {
-  // 数组，每一个都维护一个数据报地址
+  // 数据报队列
   struct retinfo retinfos[MAX_QUEUE_SIZE];
   // 记录第一个数据
   int head;
@@ -48,7 +47,7 @@ struct port_queue {
 };
 
 static struct {
-  struct port_queue *port_manager[MAX_BOUND_PORTS];
+  struct port_queue port_manager[MAX_BOUND_PORTS];
   struct spinlock managerlock;
 } queuemanager;
 
@@ -60,10 +59,6 @@ void netinit(void) {
   for (int i = 0; i < MAX_BOUND_PORTS; i++) {
     portmanager.ports[i] = 0;
   }
-  // 初始化port_manager
-  for (int i = 0; i < MAX_BOUND_PORTS; i++) {
-    queuemanager.port_manager[i] = (void *)0;
-  }
 }
 
 //
@@ -73,34 +68,33 @@ void netinit(void) {
 //
 uint64 sys_bind(void) {
   int port;
-  struct proc *p = myproc();
   argint(0, &port);
+
   acquire(&portmanager.portlock);
+
   if (portmanager.ports[port]) {
     // 已被绑定了
     release(&portmanager.portlock);
     return -1;
   }
-  portmanager.pid[port] = p->pid;
+  // 若数目大于15，装满了，装不下
+  if (queuemanager.port_manager[port].count > 15) {
+    // 满了
+    release(&portmanager.portlock);
+    return -1;
+  }
+
+  // 绑定端口
   portmanager.ports[port] = 1;
   release(&portmanager.portlock);
 
   // 初始化对应的队列
-  pt("sys_bind: queue kalloc");
-  struct port_queue *queue = (struct port_queue *)kalloc();
-
-  if (queue == 0) {
-    release(&portmanager.portlock);
-    return -1;  // 内存分配失败
-  }
-
+  acquire(&queuemanager.managerlock);
+  struct port_queue* queue = &queuemanager.port_manager[port];
   queue->head = 0;
   queue->tail = 0;
   queue->count = 0;
   initlock(&queue->queuelock, "queuelock");
-
-  acquire(&queuemanager.managerlock);
-  queuemanager.port_manager[port] = queue;
   release(&queuemanager.managerlock);
 
   return 0;
@@ -132,7 +126,7 @@ uint64 sys_unbind(void) {
 //
 uint64 sys_recv(void) {
   // recv(int dport, int *src, short *sport, char *buf, int maxlen)
-  struct proc *p = myproc();
+  struct proc* p = myproc();
 
   int dport;
   uint64 src;
@@ -155,7 +149,7 @@ uint64 sys_recv(void) {
   release(&portmanager.portlock);
 
   // 等待指定端口传来数据
-  struct port_queue *queue = queuemanager.port_manager[dport];
+  struct port_queue* queue = &queuemanager.port_manager[dport];
 
   acquire(&queue->queuelock);
   while (queue->count == 0) {
@@ -166,16 +160,15 @@ uint64 sys_recv(void) {
   int sz = queue->retinfos[head].len;
 
   // 数据拷贝到用户空间
-  copyout(p->pagetable, src, (char *)&queue->retinfos[head].src,
+  copyout(p->pagetable, src, (char*)&queue->retinfos[head].src,
           sizeof((queue->retinfos[head]).src));
-  copyout(p->pagetable, sport, (char *)&queue->retinfos[head].sport,
+  copyout(p->pagetable, sport, (char*)&queue->retinfos[head].sport,
           sizeof((queue->retinfos[head]).sport));
   copyout(p->pagetable, buf, queue->retinfos[head].data, sz);
 
   // 设置queue
   // 释放内存
-  pt("sys_recv: data free");
-  kfree((void *)queue->retinfos[head].data);
+  kfree((void*)queue->retinfos[head].data);
   queue->head = (head + 1) % MAX_QUEUE_SIZE;
   queue->count--;
 
@@ -186,9 +179,9 @@ uint64 sys_recv(void) {
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
 // of the University of California.
-static unsigned short in_cksum(const unsigned char *addr, int len) {
+static unsigned short in_cksum(const unsigned char* addr, int len) {
   int nleft = len;
-  const unsigned short *w = (const unsigned short *)addr;
+  const unsigned short* w = (const unsigned short*)addr;
   unsigned int sum = 0;
   unsigned short answer = 0;
 
@@ -204,7 +197,7 @@ static unsigned short in_cksum(const unsigned char *addr, int len) {
 
   /* mop up an odd byte, if necessary */
   if (nleft == 1) {
-    *(unsigned char *)(&answer) = *(const unsigned char *)w;
+    *(unsigned char*)(&answer) = *(const unsigned char*)w;
     sum += answer;
   }
 
@@ -221,7 +214,7 @@ static unsigned short in_cksum(const unsigned char *addr, int len) {
 // send(int sport, int dst, int dport, char *buf, int len)
 //
 uint64 sys_send(void) {
-  struct proc *p = myproc();
+  struct proc* p = myproc();
   int sport;
   int dst;
   int dport;
@@ -238,19 +231,19 @@ uint64 sys_send(void) {
   if (total > PGSIZE) return -1;
 
   pt("sys_send: send buf kalloc");
-  char *buf = kalloc();
+  char* buf = kalloc();
   if (buf == 0) {
     printf("sys_send: kalloc failed\n");
     return -1;
   }
   memset(buf, 0, PGSIZE);
 
-  struct eth *eth = (struct eth *)buf;
+  struct eth* eth = (struct eth*)buf;
   memmove(eth->dhost, host_mac, ETHADDR_LEN);
   memmove(eth->shost, local_mac, ETHADDR_LEN);
   eth->type = htons(ETHTYPE_IP);
 
-  struct ip *ip = (struct ip *)(eth + 1);
+  struct ip* ip = (struct ip*)(eth + 1);
   ip->ip_vhl = 0x45;  // version 4, header length 4*5
   ip->ip_tos = 0;
   ip->ip_len = htons(sizeof(struct ip) + sizeof(struct udp) + len);
@@ -260,14 +253,14 @@ uint64 sys_send(void) {
   ip->ip_p = IPPROTO_UDP;
   ip->ip_src = htonl(local_ip);
   ip->ip_dst = htonl(dst);
-  ip->ip_sum = in_cksum((unsigned char *)ip, sizeof(*ip));
+  ip->ip_sum = in_cksum((unsigned char*)ip, sizeof(*ip));
 
-  struct udp *udp = (struct udp *)(ip + 1);
+  struct udp* udp = (struct udp*)(ip + 1);
   udp->sport = htons(sport);
   udp->dport = htons(dport);
   udp->ulen = htons(len + sizeof(struct udp));
 
-  char *payload = (char *)(udp + 1);
+  char* payload = (char*)(udp + 1);
   if (copyin(p->pagetable, payload, bufaddr, len) < 0) {
     pt("sys_send: send buf free");
     kfree(buf);
@@ -282,16 +275,15 @@ uint64 sys_send(void) {
 
 int save_queue(struct retinfo info, uint16 port) {
   // 先判断能不能放
-  struct port_queue *queue = queuemanager.port_manager[port];
+  struct port_queue* queue = &queuemanager.port_manager[port];
   acquire(&queue->queuelock);
   if (queue->count < 16) {
     // 如果能放
     queue->retinfos[queue->tail].src = info.src;
     queue->retinfos[queue->tail].sport = info.sport;
-    pt("save_queue: queue data kalloc");
     queue->retinfos[queue->tail].data = kalloc();
     memset(queue->retinfos[queue->tail].data, 0, PGSIZE);
-    memmove((void *)queue->retinfos[queue->tail].data, (void *)info.data, info.len);
+    memmove((void*)queue->retinfos[queue->tail].data, (void*)info.data, info.len);
     queue->retinfos[queue->tail].len = info.len;
     queue->tail = (queue->tail + 1) % MAX_QUEUE_SIZE;
     (queue->count)++;
@@ -306,25 +298,25 @@ int save_queue(struct retinfo info, uint16 port) {
   return 0;
 }
 
-void ip_rx(char *buf, int len) {
+void ip_rx(char* buf, int len) {
   // don't delete this printf; make grade depends on it.
   static int seen_ip = 0;
   if (seen_ip == 0) printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
   struct retinfo info;
-  struct eth *eth = (struct eth *)buf;
-  struct ip *ip = (struct ip *)(eth + 1);
+  struct eth* eth = (struct eth*)buf;
+  struct ip* ip = (struct ip*)(eth + 1);
   info.src = ntohl(ip->ip_src);
   if (ip->ip_p == IPPROTO_UDP) {
     // udp
-    struct udp *udp = (struct udp *)(ip + 1);
+    struct udp* udp = (struct udp*)(ip + 1);
     info.sport = ntohs(udp->sport);
     uint16 dport = ntohs(udp->dport);
     if (portmanager.ports[dport]) {
       // 已经bind端口
       // 负载
-      info.data = (char *)(udp + 1);
+      info.data = (char*)(udp + 1);
       info.len = ntohs(udp->ulen) - sizeof(struct udp);
       // 保存到相应的队列
       if (save_queue(info, dport) < 0) {
@@ -347,7 +339,7 @@ void ip_rx(char *buf, int len) {
 // qemu to send IP packets to xv6; the real ARP
 // protocol is more complex.
 //
-void arp_rx(char *inbuf) {
+void arp_rx(char* inbuf) {
   static int seen_arp = 0;
 
   if (seen_arp) {
@@ -358,19 +350,19 @@ void arp_rx(char *inbuf) {
   printf("arp_rx: received an ARP packet\n");
   seen_arp = 1;
 
-  struct eth *ineth = (struct eth *)inbuf;
-  struct arp *inarp = (struct arp *)(ineth + 1);
+  struct eth* ineth = (struct eth*)inbuf;
+  struct arp* inarp = (struct arp*)(ineth + 1);
 
   pt("arp_rx: alloc");
-  char *buf = kalloc();
+  char* buf = kalloc();
   if (buf == 0) panic("send_arp_reply");
 
-  struct eth *eth = (struct eth *)buf;
+  struct eth* eth = (struct eth*)buf;
   memmove(eth->dhost, ineth->shost, ETHADDR_LEN);  // ethernet destination = query source
   memmove(eth->shost, local_mac, ETHADDR_LEN);     // ethernet source = xv6's ethernet address
   eth->type = htons(ETHTYPE_ARP);
 
-  struct arp *arp = (struct arp *)(eth + 1);
+  struct arp* arp = (struct arp*)(eth + 1);
   arp->hrd = htons(ARP_HRD_ETHER);
   arp->pro = htons(ETHTYPE_IP);
   arp->hln = ETHADDR_LEN;
@@ -388,8 +380,8 @@ void arp_rx(char *inbuf) {
   kfree(inbuf);
 }
 
-void net_rx(char *buf, int len) {
-  struct eth *eth = (struct eth *)buf;
+void net_rx(char* buf, int len) {
+  struct eth* eth = (struct eth*)buf;
 
   if (len >= sizeof(struct eth) + sizeof(struct arp) && ntohs(eth->type) == ETHTYPE_ARP) {
     arp_rx(buf);
@@ -399,24 +391,4 @@ void net_rx(char *buf, int len) {
     pt("net_rx: free buf");
     kfree(buf);
   }
-}
-
-void netclean(int pid) {
-  uint port = 0;
-  for (; port < MAX_BOUND_PORTS; port++) {
-    if (portmanager.pid[port] == pid) break;
-  }
-  if (port == MAX_BOUND_PORTS) return;
-
-  acquire(&portmanager.portlock);
-  struct port_queue *queue = queuemanager.port_manager[port];
-  for (uint i = queue->head; i != queue->tail; i = (i + 1 + MAX_QUEUE_SIZE) % MAX_QUEUE_SIZE) {
-    pt("queue data free");
-    kfree(queue->retinfos[i].data);
-  }
-  pt("free queue");
-  kfree(queue);
-  release(&portmanager.portlock);
-
-  return;
 }

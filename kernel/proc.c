@@ -288,7 +288,6 @@ void reparent(struct proc *p) {
 void kexit(int status) {
   struct proc *p = myproc();
 
-  netclean(p->pid);
   if (p == initproc) panic("init exiting");
 
   // Close all open files.
@@ -321,13 +320,6 @@ void kexit(int status) {
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
-  pt("exit");
-  pt("exit");
-  pt("exit");
-  pt("exit");
-  pt("exit");
-  pt("exit");
-  pt("exit");
   sched();
   panic("zombie exit");
 }

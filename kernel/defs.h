@@ -237,7 +237,6 @@ void e1000_intr(void);
 int e1000_transmit(char*, int);
 
 // net.c
-void netclean(int);
 void netinit(void);
 void net_rx(char* buf, int len);
 
