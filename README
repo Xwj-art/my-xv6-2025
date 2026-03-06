@@ -1,48 +1,14 @@
-xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
-Version 6 (v6).  xv6 loosely follows the structure and style of v6,
-but is implemented for a modern RISC-V multiprocessor using ANSI C.
+### Implement copy-on-write fork
 
-ACKNOWLEDGMENTS
+1. 明确需求。创建子进程时，清除PTE_W，子进程与父进程映射到同一页。写入数据时，若可写，复制为新页，否则错误。使用引用计数来约定释放页的时机。发生错误或内存不够，杀死进程。
+2. 先更改kalloc能够使用引用计数。我该怎么来判定是要分配内存还是增加引用计数呢？如果是写入数据，并且可写，则分配内存，如果是fork，则增加引用计数，这个逻辑应该是在外面判断，传参数表示情形，为了不改变其他函数的接口，我们分析出这个分配内存和增加引用的逻辑只与父子进程有关函数相关，我们可以再实现一个函数cowalloc来实现以上功能。
+3. 理一下cow的使用场景。当页面只有读权限时，不需要cow，当页面有写权限时，若有子进程，需要pte_c=1，pte_w为0，无子进程，pte_w=1，pte_c=0。我们只需要关注写的场景即可，pte_w是一个标志，告诉我们写时错误是否需要分配页面。若vmfault传来的参数中read=1，读权限错误，必错；写权限错误需要我们判断是否pte_c为1，即原来可以写。
+4. vmfault中，是要判断是否是写，如果是写，并且pte_c为1，则需要分配内存。如果是读，
 
-xv6 is inspired by John Lions's Commentary on UNIX 6th Edition (Peer
-to Peer Communications; ISBN: 1-57398-013-7; 1st edition (June 14,
-2000)).  See also https://pdos.csail.mit.edu/6.1810/, which provides
-pointers to on-line resources for v6.
+5. 捋一下。大概是这些地方要改，一个usertrap的处理，如果是r_scause()=15并且pte_c为1，需要复制内存；kalloc.c里添加引用计数机制来实现cow；vm.c中，一个vmfault，一个copyout，都是需要写入数据，判断pte_c=1，复制内存；uvmcopy，fork时增加引用计数。
 
-The following people have made contributions: Russ Cox (context switching,
-locking), Cliff Frey (MP), Xiao Yu (MP), Nickolai Zeldovich, and Austin
-Clements.
+6. 捋一下。首先cow不会页缺失，因为已经cv完了，所以读不会错误，错了就是杀死，必定是权限不允许，写会错误，需要分配页。
 
-We are also grateful for the bug reports and patches contributed by
-Abhinavpatel00, Takahiro Aoyagi, Marcelo Arroyo, Hirbod Behnam, Silas
-Boyd-Wickizer, Anton Burtsev, carlclone, Ian Chen, clivezeng, Dan
-Cross, Cody Cutler, Mike CAT, Tej Chajed, Asami Doi,Wenyang Duan,
-echtwerner, eyalz800, Nelson Elhage, Saar Ettinger, Alice Ferrazzi,
-Nathaniel Filardo, flespark, Peter Froehlich, Yakir Goaron, Shivam
-Handa, Matt Harvey, Bryan Henry, jaichenhengjie, Jim Huang, Matúš
-Jókay, John Jolly, Alexander Kapshuk, Anders Kaseorg, kehao95,
-Wolfgang Keller, Jungwoo Kim, Jonathan Kimmitt, Eddie Kohler, Vadim
-Kolontsov, Austin Liew, l0stman, Pavan Maddamsetti, Imbar Marinescu,
-Yandong Mao, Matan Shabtay, Hitoshi Mitake, Carmi Merimovich,
-mes900903, Mark Morrissey, mtasm, Joel Nider, Hayato Ohhashi,
-OptimisticSide, papparapa, phosphagos, Harry Porter, Greg Price, Zheng
-qhuo, Quancheng, RayAndrew, Jude Rich, segfault, Ayan Shafqat, Eldar
-Sehayek, Yongming Shen, Fumiya Shigemitsu, snoire, Taojie, Cam Tenny,
-tyfkda, Warren Toomey, Stephen Tu, Alissa Tung, Rafael Ubal, unicornx,
-Amane Uehara, Pablo Ventura, Luc Videau, Xi Wang, WaheedHafez, Keiichi
-Watanabe, Lucas Wolf, Nicolas Wolovick, wxdao, Grant Wu, x653, Andy
-Zhang, Jindong Zhang, Icenowy Zheng, ZhUyU1997, and Zou Chang Wei.
+7. 已经过了cowtest测试用例，只剩下usertest的俩了这时候，感觉对哪些东西panic然后在kerneltrap处理，内核崩了；哪些东西在usertrap处理，杀死进程内核继续运转有了理解了，之前确实没有关注过这个trap分为user和kernel的，偷懒和为了方便调试直接在实现的功能里用了大量的panic，后面都找出来改了。而usertest里的话，是遇到了lazy_alloc测试用例没有过，所以这个实验是支持这两种分配方法的，cow和lazy_alloc，那么这时候我已经实现了cow，还如何在usertrap中使用懒页分配？usertrap处理这里，我该如何辨别是权限位出错还是缺页呢？这两个最大的区别应该是有无分配物理页。如果访问的地址在分配的范围里，但是访问不成功，那么就是缺页，否则就是有页但是还是访问错误，检查一下是不是cow页。
 
-ERROR REPORTS
-
-Please send errors and suggestions to Frans Kaashoek and Robert Morris
-(kaashoek,rtm@mit.edu).  The main purpose of xv6 is as a teaching
-operating system for MIT's 6.1810, so we are more interested in
-simplifications and clarifications than new features.
-
-BUILDING AND RUNNING XV6
-
-You will need a RISC-V "newlib" tool chain from
-https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
-riscv64-softmmu.  Once they are installed, and in your shell
-search path, you can run "make qemu".
+8. 卡在了lazy_unmap这个测试用例，看了一下原来是之前以为：没有懒页分配，而是每个都会在进程创建好的时候分配好内存这个想法导致我把俩copy的continue换成panic了，导致不能正常复制懒页分配的页，直接panic了，这里应该要continue的，因为后面就算出错了，也是缺页什么的，会交给usertrap来处理的。
