@@ -1,48 +1,41 @@
-xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
-Version 6 (v6).  xv6 loosely follows the structure and style of v6,
-but is implemented for a modern RISC-V multiprocessor using ANSI C.
+## Summary Of Lab1
 
-ACKNOWLEDGMENTS
+### sleep:
 
-xv6 is inspired by John Lions's Commentary on UNIX 6th Edition (Peer
-to Peer Communications; ISBN: 1-57398-013-7; 1st edition (June 14,
-2000)).  See also https://pdos.csail.mit.edu/6.1810/, which provides
-pointers to on-line resources for v6.
+1. 熟悉一下传参，调用pause来暂停用户指定的时间。
 
-The following people have made contributions: Russ Cox (context switching,
-locking), Cliff Frey (MP), Xiao Yu (MP), Nickolai Zeldovich, and Austin
-Clements.
+### sixfive:
 
-We are also grateful for the bug reports and patches contributed by
-Abhinavpatel00, Takahiro Aoyagi, Marcelo Arroyo, Hirbod Behnam, Silas
-Boyd-Wickizer, Anton Burtsev, carlclone, Ian Chen, clivezeng, Dan
-Cross, Cody Cutler, Mike CAT, Tej Chajed, Asami Doi,Wenyang Duan,
-echtwerner, eyalz800, Nelson Elhage, Saar Ettinger, Alice Ferrazzi,
-Nathaniel Filardo, flespark, Peter Froehlich, Yakir Goaron, Shivam
-Handa, Matt Harvey, Bryan Henry, jaichenhengjie, Jim Huang, Matúš
-Jókay, John Jolly, Alexander Kapshuk, Anders Kaseorg, kehao95,
-Wolfgang Keller, Jungwoo Kim, Jonathan Kimmitt, Eddie Kohler, Vadim
-Kolontsov, Austin Liew, l0stman, Pavan Maddamsetti, Imbar Marinescu,
-Yandong Mao, Matan Shabtay, Hitoshi Mitake, Carmi Merimovich,
-mes900903, Mark Morrissey, mtasm, Joel Nider, Hayato Ohhashi,
-OptimisticSide, papparapa, phosphagos, Harry Porter, Greg Price, Zheng
-qhuo, Quancheng, RayAndrew, Jude Rich, segfault, Ayan Shafqat, Eldar
-Sehayek, Yongming Shen, Fumiya Shigemitsu, snoire, Taojie, Cam Tenny,
-tyfkda, Warren Toomey, Stephen Tu, Alissa Tung, Rafael Ubal, unicornx,
-Amane Uehara, Pablo Ventura, Luc Videau, Xi Wang, WaheedHafez, Keiichi
-Watanabe, Lucas Wolf, Nicolas Wolovick, wxdao, Grant Wu, x653, Andy
-Zhang, Jindong Zhang, Icenowy Zheng, ZhUyU1997, and Zou Chang Wei.
+1. 功能是将用户指定的一些文件中5或者6的倍数打印出来。
+2. 步骤拆分：读取单个文件中的数据；识别出这些数据是否为5或6的倍数；套一层循环依次传入文件路径
+3. 对于文件的数据，存在buf中，要搞清楚的是怎么分辨出是否是5/6的倍数。有以下限制：分隔符，以及buf的长度限制（可能会将一个大数字分割到两个buf的首尾）。
+4. 使用一个num来代表当前数字的值，初始为0。我们可以使用一个flag来代表两个状态：状态1，下一个若是数字，可以使用num = num * 10 + character - '0'来进行数字的拼接；状态2，下一个是数字，但是只是一个普通字符，不能进行数字拼接。由于可能会处理同一个文件的多个buf，我们用一个全局变量flag来进行这两个buf的拼接，同理num也为全局变量。
+5. 状态1：文件开头结尾为分隔符，初值为1，若遇到除了数字和分隔符以外的字符，变为状态2；状态2:若遇到分隔符，则可能要读取数字，变为状态1。
 
-ERROR REPORTS
+### memdump
 
-Please send errors and suggestions to Frans Kaashoek and Robert Morris
-(kaashoek,rtm@mit.edu).  The main purpose of xv6 is as a teaching
-operating system for MIT's 6.1810, so we are more interested in
-simplifications and clarifications than new features.
+1. 前面四个是一样的，只要弄清楚指针指向的数据的大小即可；S是打印一个字符串，data需要后移字符串长度；s是打印data接下来8个字节的地址指向的字符串，由于是一个地址大小，data+=8。
+2. 遇到的问题：不知道printf被重新实现，使用pirntf("%llX")时直接打印的%llX，调了很久。
+3. 对这一步转换很模糊
 
-BUILDING AND RUNNING XV6
+```c
+char* s = "ab"; 
+char *data = (char*) &s;
 
-You will need a RISC-V "newlib" tool chain from
-https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
-riscv64-softmmu.  Once they are installed, and in your shell
-search path, you can run "make qemu".
+printf("%ld\n", sizeof(void*));
+```
+
+在s上花了些时间才看懂，原来是将指向字符串地址的指针强转为了char\*类型。看出来以后找了下指针大小，再将data强制转换回char**，就可以输出*data了。
+
+### find
+
+1. find主要是学习ls里如何获取目录项，以及字符串处理，如：strcmp对比，开辟空间给新字符串，防止污染下一轮处理的数据。
+2. stat：存储着文件的元数据，如类型/inode号等；dirent：目录项，一个是inode号，一个是对应文件名字。读取目录文件时，将每一个数据项逐个放入dirent中，使用dirent中的name字段来与当前目录拼接路径。
+3. stat.type判断是文件还是目录，文件则判断名字是否相同，目录则递归查找，要排除. 和 ..这两个目录
+
+### exec
+
+1. find查找到的文件是要在命令的末尾的，注意参数的顺序。
+2. fork调用返回pid，子进程pid为0，父进程pid>0，在pid>0的一项使用wait(子进程pid)即可，我们在pid=0的一项执行exec语句
+3. exec语句中，第一个参数为命令(eg:echo)，不是文件；第二个参数是命令+参数列表(eg:echo hi ./wc)，所以要先将find找到的文件名先拼接到字符串数组最后才能作为对文件的操作。
+4. 在exec之前不知道会在find的基础上改，所以find中是找到名字直接打印，到这儿稍微改了一下，使用char* fns[]来维护找到的路径名字，返回后根据是否有-exec指令来进行选择。
