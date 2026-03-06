@@ -1,48 +1,60 @@
-xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
-Version 6 (v6).  xv6 loosely follows the structure and style of v6,
-but is implemented for a modern RISC-V multiprocessor using ANSI C.
+### Speed up system calls
 
-ACKNOWLEDGMENTS
+1. 共享页面USYSCALL开头部分存储着用户进程的pid，任务是为getpid()实现优化，可以直接从共享页中获取用户进程的pid返回。
+2. yysy，一开始没有看懂kernel crossings是啥意思来着，因为前面说内核和用户之间共享，所以我感觉是在用户态这边整个共享页，然后内核态那边将这个页的页表项放到页表里的，但是感觉说不通吧，因为这样的话getpid好像没啥地方优化了。后面让gpt解释了一下这个意思，原来是用户陷入转内核。摸清楚了这个再捋一下的话，逻辑应该是用户态这边的数据和内核态这边是有一部分数据是共享的，这样getpid就不需要trap了，可以直接从共享页拿数据出来，加速在这儿了。
+3. 所以我们的任务是，分配页的时候，将共享页写到相应的页表项里，并向共享页首地址写下pid，这样ugetpid就可以直接从这里读取了。
+4. 我感觉这里我之所以一开始不知道ugetpid是怎么使用的，想法是获取pid来加速，结果原来是已经给好了ugetpid作为测试作用，然后要求我们插入页表项，向页起始地址写下内容，看看用户态这边使用ugetpid来获取是否与getpid对得上。
+5. 在知道是在分配页时初始化共享页后，就去allocproc里开始写了，但是一开始只写了申请物理块和添加映射，没有管后面的释放，所以会有panic: freewalk: leaf，后面按照trapframe的管理方式，在freeproc处也添加了释放才过了
 
-xv6 is inspired by John Lions's Commentary on UNIX 6th Edition (Peer
-to Peer Communications; ISBN: 1-57398-013-7; 1st edition (June 14,
-2000)).  See also https://pdos.csail.mit.edu/6.1810/, which provides
-pointers to on-line resources for v6.
+### Print a page table
 
-The following people have made contributions: Russ Cox (context switching,
-locking), Cliff Frey (MP), Xiao Yu (MP), Nickolai Zeldovich, and Austin
-Clements.
+1. 明确目的：给出一个目录，递归打印所有表项。
+2. 先不递归打印各级目录，先把所给的这个表打印出来。
+3. 在如何打印pte映射的页的虚拟地址卡住了。要理解x86-book中3.2的图。每个pte都映射一个pa，每个pa都是56位，由44位ppn和12个0组成，从虚拟地址由高39到低13位可以每9位提取出一个页表项编号，在页表中获取编号对应的pte，从pte中获取ppn，而获取ppn后，拼接12个0，我们就拿到了下一个页表的物理地址，再使用&，就拿到了内核看到的虚拟地址。
+4. yysy，但是实际上要打印的是用户进程看到的虚拟地址。这个虚拟地址的话，那就是弄清楚每一个表号以及其所管理的内存范围。顶级页表从0x0开始映射，每一个表号对应管理空间大小为1<<(2*9+12)，下一级是1<<(9+12)，再下一级是1<<12，也就是页大小。那么我们不难理解，我们起始地址为0，获取表号L2后，0+L2*(1<<(2*9+12))即为下一个页表所管理空间的起始地址。
+5, 在这儿卡了好久，其实顺着捋过去就是使用着用户进程传来的虚拟地址来最终找到物理页的，因此就是用户进程的虚拟地址。而用户虚拟地址的映射方法就是从每个表管理一个部分的空间逐级分下去越来越小，管理好偏移量即可。
+6. 或许要考虑一下是怎么使用页表来构建用户空间的。一级页表来管理整个空间大小，是1<<(9*2+12)到512<<(9*2+12)，而一级页表又是通过管理二级页表来管理空间的，以一级页表pte管理空间的起始地址为base，每个二级页表管理的空间为base+1<<(9+12)到base+512<<(9+12)，同理，那么三级页表以上一级页表的管理空间起始地址为base，那么管理地址即为base+1<<12到base+512<<12，即管理从base开始的512个页，这样就建立了对整个用户空间的映射。（这里的base都为虚拟地址）
 
-We are also grateful for the bug reports and patches contributed by
-Abhinavpatel00, Takahiro Aoyagi, Marcelo Arroyo, Hirbod Behnam, Silas
-Boyd-Wickizer, Anton Burtsev, carlclone, Ian Chen, clivezeng, Dan
-Cross, Cody Cutler, Mike CAT, Tej Chajed, Asami Doi,Wenyang Duan,
-echtwerner, eyalz800, Nelson Elhage, Saar Ettinger, Alice Ferrazzi,
-Nathaniel Filardo, flespark, Peter Froehlich, Yakir Goaron, Shivam
-Handa, Matt Harvey, Bryan Henry, jaichenhengjie, Jim Huang, Matúš
-Jókay, John Jolly, Alexander Kapshuk, Anders Kaseorg, kehao95,
-Wolfgang Keller, Jungwoo Kim, Jonathan Kimmitt, Eddie Kohler, Vadim
-Kolontsov, Austin Liew, l0stman, Pavan Maddamsetti, Imbar Marinescu,
-Yandong Mao, Matan Shabtay, Hitoshi Mitake, Carmi Merimovich,
-mes900903, Mark Morrissey, mtasm, Joel Nider, Hayato Ohhashi,
-OptimisticSide, papparapa, phosphagos, Harry Porter, Greg Price, Zheng
-qhuo, Quancheng, RayAndrew, Jude Rich, segfault, Ayan Shafqat, Eldar
-Sehayek, Yongming Shen, Fumiya Shigemitsu, snoire, Taojie, Cam Tenny,
-tyfkda, Warren Toomey, Stephen Tu, Alissa Tung, Rafael Ubal, unicornx,
-Amane Uehara, Pablo Ventura, Luc Videau, Xi Wang, WaheedHafez, Keiichi
-Watanabe, Lucas Wolf, Nicolas Wolovick, wxdao, Grant Wu, x653, Andy
-Zhang, Jindong Zhang, Icenowy Zheng, ZhUyU1997, and Zou Chang Wei.
+> kernel的起始地址指向内存起始地址，低于这个地址的就是其他物理硬件的地址了
 
-ERROR REPORTS
+### Use superpages
 
-Please send errors and suggestions to Frans Kaashoek and Robert Morris
-(kaashoek,rtm@mit.edu).  The main purpose of xv6 is as a teaching
-operating system for MIT's 6.1810, so we are more interested in
-simplifications and clarifications than new features.
+1. 这里应该是分为分配超级页和释放超级页，以及释放部分内存时，将不足一个超级页大小的超级页降级为普通页。
+2. 先分配超级页。页大小为2MB，也就是管理虚拟地址的低21位大小空间，那么就是原来的二级页表+三级页表合并了，直接管理这么大的空间而不使用三级页表来管理512个小空间。
+3. 一步步来，先把分配的写了，应该要加一个判断分配内存大小来决定分配超级页还是普通页，这里要改uvmalloc，加条分支语句。然后看看怎么分配，如果我想分配一个超级页，直接使用512次kalloc行么?当然不行了，512个kalloc又不能保证拿到的是512个连续的页，提示里说我们可以调整kalloc预留出一些超级页，再看看test，最多也就8个SUPERPGSIZE，那么我们就预留一开始的10个SUPERPG即可，加一个指针指向首个SUPERPG。
+4. 然后uvmalloc，被uvmalloc的ROUNDUP卡脖子了，我使用一次SUPERPGROUNDUP，按照超级页对齐的话，oldsz到对齐后的地址这里，真的被分配出去了吗？如果之前进程存在按页分配的话，这里似乎空了一大块并未映射，那我怎么使用超级页？所以我应该扫描从oldsz到newsz这段内存，先按照PGSIZE分配，并不断对比当前地址是否按照2MB对齐，若是且满足所需地址>2MB那么我们就进行分配。
+5. 写完了以上的分配，那么我们如何建立页表的映射呢？每个超级页管理2MB的空间，那么映射到2MB的物理内存，PPN从原来的44变为35，后面地址按照超级页大小对齐是9个0，再加上权限位10个。原先的第二级页表直接指向一个超级页，而非指向三级页表再指向普通页。这个时候也许我们应该思考一下，怎么判断要进行操作的页表是普通页还是超级页了，或许建立映射的时候还可以设置一个flag来表示这个是超级页，那个是普通页，但是如果是取消映射呢？我们需要识别这是普通页还是超级页。
+6. 如何识别是普通页还是超级页呢？由5可知，我们现在只需要前2个9位就可以拿到PPN，可以视原先三级页表为一个二级页表，一级页表拿到pte，找到二级页表的地址，再直接就拿到页地址。既然是识别，我们得明白这两者的不同在哪儿，由于超级页的对齐会将PPN[0](特权指令小册子12.5.1)置为0，所以若PPN[0]为0，即可判定是超级页。其实纠结过是否有可能：PPN[0]为0，但是是普通页呢？嗯，其实这个时候才有些看懂文档小册子里的叶子是啥意思，我们可以用perms的PTE_V和PTE_R全1，作为超级页的二级页表与普通页二级页表的区别。
+7. 所以这里主要是卡在leaf上了。要通过perms来判断是否叶子，再判断级数，就可以判断是否是超级页了。
+8. 然后继续code，先从mappages下手，建立好预期映射。大概就是如果是对superpage映射，那么就PPN[0]=0，PTE_V和PTE_R为1。那么我们要写一个重要的辅助函数superpagemap来帮我们判定传入的地址所指向页是否为超页，可以先拿PNN[2]，再拿PNN[1]，此时就可以拿本级页表的目录项进行判断，在PTE_V=1的情况下，若PTE_R为1，则pte所指为超页，否则，为普通页，通过PTE_R来判定是否为超页。
+9. 晚上回来总结了一下，将一整个物理内存空间的每一个页视为一个叶子的话，那么其实超级页在里面也只是这个三层512叉中倒数第二层的叶子而已，代表的是其原来512个叶子的总页大小所以其实我们本质上都是在进行着对一个树叶子的查找这一过程而已。
+10. 回来按照这个思路重构了一些写的很别扭的地方。这个时候就对内存分配这个过程比较熟悉了，先是分配虚拟地址空间里的空闲页，然后再将这个空闲页与物理地址建立映射，这里就会对页表进行操作。映射又分为对超级页映射和对普通页映射，我们可以通过superpagemap来检测是否是对超级页进行映射吗？显然不行，因为映射还没建立起来，我们必须根据要分配对sz来判断是否要对超页进行映射。
+11. 感觉写的由于一开始很模糊，所以很乱，重新写一下这个部分实验，用PTE_SUPER为标记位来表示超级页，这样会简单挺多，其实一开始就在纠结要不要这样的，但是感觉这样每次设计一种大页就会占一个标记位，没整。感觉写到后面乱乱的，整一整试试。
+12. 分配这里不需要改，我把分配页部分拆成了一个函数，判断分配超级页还是普通页部分在uvmalloc里面，分配则在拆出的函数里，这里直接给超级页加个PTE_S就好了。原先用判断二级页表标记位是否为叶子的逻辑改一下，改成获取的pte是否有PTE_S即可，这样的话只需要改改walk找到叶子就返回即可，叶子判断逻辑改一改，加个PTE_S位的判断，超级页标记位也算叶子了。
+13. 找到这个实验的一个小bug，这个实验向下以超级页大小取整的时候，比如对0x200000取整，大小会变成0。
+14.
+在make qemu中执行命令pgtbltest，打印会过，应该只检查了数量，但是make grade过不了，需要注意每行结果最前面有个空格，控制输出格式。
+完结，累晕。
 
-BUILDING AND RUNNING XV6
 
-You will need a RISC-V "newlib" tool chain from
-https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
-riscv64-softmmu.  Once they are installed, and in your shell
-search path, you can run "make qemu".
+使用超级页（中等/困难）
+RISC-V分页硬件除了支持普通的4096字节页面外，还支持两兆字节的页面。较大页面的通用概念称为超级页，由于RISC-V支持
+多种大小，2M页面称为兆页。操作系统通过在L1级PTE中设置PTE_V和
+PTE_R位，并将物理页号指向一个两兆字节物理内存区域的起始地址来创建超级页。该物理地址必须是两兆字节对齐的（即两兆
+字节的倍数）。您可以在RISC-V特权手册中通过搜索"megapage"和"superpage"阅读相关内容；特别是第112页顶部。使用超级
+页可以减少页表使用的物理内存量，并可以减少TLB缓存未命中。对于某些程序，这会导致性能大幅提升。
+您的任务是修改xv6内核以使用超级页。具体来说，如果用户程序调用sbrk()时指定的大小为2兆字节或更多，并且新创建
+的地址范围包含一个或多个两兆字节对齐且至少两兆字节大小的区域，内核应使用单个超级页（而不是数百个普通页）。
+当运行pgtbltest时，如果superpg_fork和superpg_free测试用例通过，您将获得此部分实验的满分。
+一些提示：
+• 阅读user/pgtbltest.c中的superpg_fork和superpg_free
+• 一个好的起点是kernel/sysproc.c中的sys_sbrk，它由sbrk系统调用调用。
+跟踪代码路径到growproc函数，该函数为sbrk急切分配内存
+• 您的内核需要能够分配和释放两兆字节的区域。修改kalloc.c以预留一些两兆字节
+的物理内存区域，并创建superalloc()和superfree()函数。
+您只需要少量两兆字节的内存块
+• 当具有超级页的进程进行fork时必须分配超级页，退出时必须释放超级页；
+您需要修改uvmcopy()和uvmunmap()
+• 当sbrk部分释放超级页时（例如，释放超级页的最后4096字节），
+您需要将超级页"降级"为普通页
+*/
