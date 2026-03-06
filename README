@@ -1,48 +1,53 @@
-xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
-Version 6 (v6).  xv6 loosely follows the structure and style of v6,
-but is implemented for a modern RISC-V multiprocessor using ANSI C.
+### Part One: NIC
 
-ACKNOWLEDGMENTS
+1. 感觉老师把步骤全都给出来了，对着写就可以了，这里主要是看xv6 book吧。
 
-xv6 is inspired by John Lions's Commentary on UNIX 6th Edition (Peer
-to Peer Communications; ISBN: 1-57398-013-7; 1st edition (June 14,
-2000)).  See also https://pdos.csail.mit.edu/6.1810/, which provides
-pointers to on-line resources for v6.
+2.
+e1000_recv会调用net_rx，然后net_rx又会调用arp_rx，arp_rx又会调用e1000_transmit，如果使用同一把锁并且粒度不够的话，在e1000_transmit申请锁时，e1000_recv会没有释放掉锁导致死锁，要么就recv一把锁，transmit一把锁，要么减小粒度，在调用arp_rx之前必须释放。
 
-The following people have made contributions: Russ Cox (context switching,
-locking), Cliff Frey (MP), Xiao Yu (MP), Nickolai Zeldovich, and Austin
-Clements.
+3. 感觉是对设备驱动这一块的各个层次不太清楚，需要再理一理。
 
-We are also grateful for the bug reports and patches contributed by
-Abhinavpatel00, Takahiro Aoyagi, Marcelo Arroyo, Hirbod Behnam, Silas
-Boyd-Wickizer, Anton Burtsev, carlclone, Ian Chen, clivezeng, Dan
-Cross, Cody Cutler, Mike CAT, Tej Chajed, Asami Doi,Wenyang Duan,
-echtwerner, eyalz800, Nelson Elhage, Saar Ettinger, Alice Ferrazzi,
-Nathaniel Filardo, flespark, Peter Froehlich, Yakir Goaron, Shivam
-Handa, Matt Harvey, Bryan Henry, jaichenhengjie, Jim Huang, Matúš
-Jókay, John Jolly, Alexander Kapshuk, Anders Kaseorg, kehao95,
-Wolfgang Keller, Jungwoo Kim, Jonathan Kimmitt, Eddie Kohler, Vadim
-Kolontsov, Austin Liew, l0stman, Pavan Maddamsetti, Imbar Marinescu,
-Yandong Mao, Matan Shabtay, Hitoshi Mitake, Carmi Merimovich,
-mes900903, Mark Morrissey, mtasm, Joel Nider, Hayato Ohhashi,
-OptimisticSide, papparapa, phosphagos, Harry Porter, Greg Price, Zheng
-qhuo, Quancheng, RayAndrew, Jude Rich, segfault, Ayan Shafqat, Eldar
-Sehayek, Yongming Shen, Fumiya Shigemitsu, snoire, Taojie, Cam Tenny,
-tyfkda, Warren Toomey, Stephen Tu, Alissa Tung, Rafael Ubal, unicornx,
-Amane Uehara, Pablo Ventura, Luc Videau, Xi Wang, WaheedHafez, Keiichi
-Watanabe, Lucas Wolf, Nicolas Wolovick, wxdao, Grant Wu, x653, Andy
-Zhang, Jindong Zhang, Icenowy Zheng, ZhUyU1997, and Zou Chang Wei.
+### Part Two: UDP Receive
 
-ERROR REPORTS
+1. 我们要怎么设置每个端口的队列呢？这些端口对应的队列应该是一个全局的变量，我们可以设置一个二维数组来管理，顺便加个锁。然后因为还要bind端口号，加个全局的port数组。
+2. 捋一下是怎么send/recv数据的。send的话，是设置了头部，然后将要发送的数据从用户区cv到内核(udp的负载部分)里边，再调用e1000_transmit驱动处理程序，将数据传到描述符环，然后硬件自动检测发送。recv的话，是从e1000_recv开始，获得数据以后调用net_rx，如果是udp数据报，把数据报送到ip_rx，放到udp相关端口的缓冲队列中，而sys_recv会监听指定端口是否有数据，若有则接收，写入到用户空间。
+3. 我觉得这个实验其实工作量也挺大，因为要维护的东西有些多吧，定义了以下变量：
 
-Please send errors and suggestions to Frans Kaashoek and Robert Morris
-(kaashoek,rtm@mit.edu).  The main purpose of xv6 is as a teaching
-operating system for MIT's 6.1810, so we are more interested in
-simplifications and clarifications than new features.
+```c
+static struct {
+  uint8 ports[MAX_BOUND_PORTS];
+  struct spinlock portlock;
+} portmanager;
 
-BUILDING AND RUNNING XV6
+struct retinfo {
+  int src;
+  short sport;
+  char *data;
+  uint len;
+};
 
-You will need a RISC-V "newlib" tool chain from
-https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
-riscv64-softmmu.  Once they are installed, and in your shell
-search path, you can run "make qemu".
+struct port_queue {
+  // 数组，每一个都维护一个数据报地址
+  struct retinfo retinfos[MAX_QUEUE_SIZE];
+  // 记录第一个数据
+  int head;
+  // 记录数据后第一个空位
+  int tail;
+  // 记录总数据报数目
+  int count;
+  struct spinlock queuelock;
+};
+
+static struct {
+  struct port_queue *port_manager[MAX_BOUND_PORTS];
+  struct spinlock managerlock;
+} queuemanager;
+```
+
+有点套娃，要bind每个端口，所以定义了个端口管理的，判断端口是否激活了，这个逻辑我跟port_queue分开了，应该是可以写一起的，吧。如果写一起的话就是一个大锁来控制bind和recv里面对这个manager访问了，应该能过。retinfo的话，是纯因为后面发现传参进来要绑定参数写参数回去测试，所以把一个纯净的指针数组魔改成这玩意儿了。然后这个数组又是每一个端口的队列，所以全局的应该是一个二维数组这样子，端口号来找到数组。因为要排队，所以用了一个head指向第一个数据报，用了tail指向数据报后第一个空格，为了方便比较和16的大小，写了这个len，其实这仨随便两个就能推剩下一个，为了方便还是这样写了。
+
+4. 最麻烦的地方应该是内存分配这块吧，因为嵌套的指针很多。全局的queuemanager里是一个指针数组，然后每个指针指向的元素里又有data这个指针，需要对这两个的内存进行管理，这个make grade运行后最后一项就是free的情况，判断刚开始多少空闲内存，结束时多少空闲内存。python脚本运行会干扰最后make grade时txone这项。
+
+5. 如果用户不使用unbind来告诉我们端口号解绑了，我们怎么知道是否需要将绑定端口时分配给队列的空间释放掉？只能是这个进程运行完释放掉了，也就是exit之前，我要将分配的内存给释放掉，那么我需要再写一项函数来将整个net运行时分配的内存给释放掉，再在exit时掉用即可。还有transmit分配的内存，之前采取的策略是检测到已经发送了再释放之前的内存，可以最后检查一下内存是否全部被释放。
+
+6. 真的被指针打败了，遂使用数组来一次性申请超大份空间，过了，唉。
